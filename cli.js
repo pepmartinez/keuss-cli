@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
-var async =   require ('async');
-var program = require ('commander');
-var _ =       require ('lodash');
+var async =    require ('async');
+var program =  require ('commander');
+var _ =        require ('lodash');
+var rand_obj = require ('random-object');
 
- program
+
+program
   .version ('0.0.1')
   .usage   ('[options]')
   .option  ('-q, --queue [queue]', 'act on this queue')
@@ -22,8 +24,6 @@ var _ =       require ('lodash');
   .option  ('-t, --stats <value>', 'use stats backend. defaults to \'mem\'')
   .option  ('-v, --verbose', 'be verbose')
   .parse   (process.argv);
-
-var MQ = require ('keuss/backends/' + (program.backend || 'mongo'));
 
 
 /////////////////////////////////////////
@@ -47,13 +47,15 @@ function info (q, cb) {
 function consume_loop (q, n, cb) {
   if (n == 0) return cb ();
   
-  q.pop ('consumer', function (err, res) {
+  q.pop ('keuss-cli', function (err, res) {
     if (err) return cb (err);    
+
     if (program.dumpProduced) {
       console.log ('%j', res, {});
     }
-    else if (program.verbose) {
-      console.log ('consume_loop: get %j', res);
+    
+    if (program.verbose) {
+      console.log ('consume_loop: got element');
     }
     
     var next_n = _.isNil (n) ? n : (n ? n - 1 : n);
@@ -79,7 +81,8 @@ function produce_loop (q, n, cb) {
     opts.delay = program.producerDelay;
   }
   
-  q.push ({elem:44, tt:{a:1, b:'2'}}, opts, function (err, res) {
+  var obj = rand_obj.randomObject ();
+  q.push (obj, opts, function (err, res) {
     if (err) {
       if (err == 'drain') {
         console.log ('queue in drain, stopping producer');
@@ -90,7 +93,7 @@ function produce_loop (q, n, cb) {
     }
 
     if (program.verbose) {
-      console.log ('produce_loop: put %s', res); 
+      console.log ('produce_loop: put %j', obj); 
     }
   
     var next_n = _.isNil (n) ? n : (n ? n - 1 : n);
@@ -131,6 +134,7 @@ if (program.stats) {
 }
 
 
+var MQ = require ('keuss/backends/' + (program.backend || 'mongo'));
 MQ (q_opts, function (err, factory) {
   if (err) return console.error ('MQ.init: %s', err, {});
   
@@ -183,10 +187,11 @@ MQ (q_opts, function (err, factory) {
     console.log ('farewell...');
     async.series ([
       (cb) => q.drain (cb),
-      (cb) => {factory.close(); cb ();}
+      (cb) => {factory.close(); cb ();},
+      (cb) => {q.cancel (); cb ();}
     ], function () {
       if (err) console.error (err);
-      console.log ('... and good night');
+      console.log ('...and good night');
     });
   }
 
