@@ -4,6 +4,12 @@ var async =    require ('async');
 var program =  require ('commander');
 var _ =        require ('lodash');
 var rand_obj = require ('random-object');
+var Chance =   require('chance');
+
+var chance = new Chance();
+
+var objs = [];
+for (var i = 0; i < 111; i++) objs.push (rand_obj.randomObject ());
 
 
 program
@@ -81,7 +87,7 @@ function produce_loop (q, n, cb) {
     opts.delay = program.producerDelay;
   }
   
-  var obj = rand_obj.randomObject ();
+  var obj = objs[chance.integer ({min:0, max:110})];
   q.push (obj, opts, function (err, res) {
     if (err) {
       if (err == 'drain') {
@@ -173,6 +179,8 @@ MQ (q_opts, function (err, factory) {
     });
   }
 
+//  tasks.push ((cb) => setTimeout (cb, 2000));
+  
   async.parallel (tasks, function (err) {
     if (err) {
       console.error (err);
