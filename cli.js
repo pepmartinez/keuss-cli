@@ -17,9 +17,9 @@ program
   .usage   ('[options]')
   .option  ('-q, --queue [queue]', 'act on this queue')
   .option  ('-i, --info', 'get info about queue')
-  .option  ('-c, --consumer', 'run consumer loop')
+  .option  ('-c, --consumer <n>', 'run consumer loop with n consumers', parseInt)
   .option  ('-C, --consumer-num <n>', 'consume n elements', parseInt)
-  .option  ('-p, --producer', 'run producer loop')
+  .option  ('-p, --producer <n>', 'run producer loop with n producers', parseInt)
   .option  ('-P, --producer-num <n>', 'produce n elements', parseInt)
   .option  ('-d, --producer-delay <n>', 'produce with a delay of n secs', parseInt)
   .option  ('-A, --producer-loop-delay <n>', 'loop delay in millisecs', parseInt)
@@ -165,14 +165,14 @@ MQ (q_opts, function (err, factory) {
     })
   }
 
-  if (program.consumer) {
+  for (var c = 0; c < program.consumer; c++) {
     tasks.push (function (cb) {
       console.log ('MQ.init: initiating consume loop');
       consume_loop (q, program.consumerNum, cb);
     });
   }
   
-  if (program.producer) {
+  for (p = 0; p < program.producer; p++) {
     tasks.push (function (cb) {
       console.log ('MQ.init: initiating produce loop with ', program.producerNum);
       produce_loop (q, program.producerNum, cb);
