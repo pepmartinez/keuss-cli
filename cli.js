@@ -40,6 +40,7 @@ function info (q, cb) {
     size:         cb => q.size (cb),
     totalSize:    cb => q.totalSize (cb),
     schedSize:    cb => q.schedSize (cb),
+    resvSize:     cb => q.resvSize (cb),
     next_t:       cb => q.next_t (cb),
     stats:        cb => q.stats (cb),
     paused:       cb => q.paused (cb),
