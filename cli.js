@@ -1,216 +1,336 @@
 #!/usr/bin/env node
 
-var async =    require ('async');
-var program =  require ('commander');
-var _ =        require ('lodash');
-var rand_obj = require ('random-object');
-var Chance =   require('chance');
+const async =    require ('async');
+const program =  require ('commander');
+const _ =        require ('lodash');
+const rand_obj = require ('random-object');
+const Chance =   require('chance');
 
-var chance = new Chance();
-
-var objs = [];
-for (var i = 0; i < 111; i++) objs.push (rand_obj.randomObject ());
-
-
-program
-  .version ('0.0.1')
-  .usage   ('[options]')
-  .option  ('-q, --queue [queue]', 'act on this queue')
-  .option  ('-i, --info', 'get info about queue')
-  .option  ('-0, --pause', 'pause queue')
-  .option  ('-1, --resume', 'resume queue')
-  .option  ('-c, --consumer <n>', 'run consumer loop with n consumers', parseInt)
-  .option  ('-C, --consumer-num <n>', 'consume n elements', parseInt)
-  .option  ('-p, --producer <n>', 'run producer loop with n producers', parseInt)
-  .option  ('-P, --producer-num <n>', 'produce n elements', parseInt)
-  .option  ('-d, --producer-delay <n>', 'produce with a delay of n secs', parseInt)
-  .option  ('-A, --producer-loop-delay <n>', 'loop delay in millisecs', parseInt)
-  .option  ('-B, --consumer-loop-delay <n>', 'loop delay in millisecs', parseInt)
-  .option  ('-D, --dump-produced', 'dump text of produced messages on log')
-  .option  ('-b, --backend <value>', 'use queue backend. defaults to \'mongo\'')
-  .option  ('-s, --signaller <value>', 'use signaller backend. defaults to \'local\'')
-  .option  ('-t, --stats <value>', 'use stats backend. defaults to \'mem\'')
-  .option  ('-v, --verbose', 'be verbose')
-  .parse   (process.argv);
+const chance = new Chance();
 
 
 /////////////////////////////////////////
-function info (q, cb) {
+function out (ctx, ...args) {
+  if (ctx.main_opts.verbose) console.log ('-->', ...args);
+}
+
+
+/////////////////////////////////////////
+function create_mq (ctx, cb) {
+  const opts = ctx.main_opts;
+  out (ctx, `MQ.init: using backend ${opts.backend || 'mongo'}`);
+
+  const mq_opts = _.clone (opts.backendOpt || {});
+
+  if (opts.signaller) {
+    const signal_provider = require ('keuss/signal/' + opts.signaller);
+    mq_opts.signaller = {
+      provider: signal_provider
+    };
+
+    out (ctx, `MQ.init: using signeller ${opts.signaller}`);
+  }
+
+  if (opts.stats) {
+    const stats_provider = require ('keuss/stats/' + opts.stats);
+    mq_opts.stats = {
+      provider: stats_provider
+    };
+
+    out (ctx, `MQ.init: using stats ${opts.stats}`);
+  }
+
+  out (ctx, 'MQ.init: use opts', mq_opts);
+
+  const MQ = require ('keuss/backends/' + (opts.backend || 'mongo'));
+  MQ (mq_opts, (err, factory) => {
+    if (err) return cb (err);
+    out (ctx, 'MQ.init: backend initiated');
+    ctx.factory = factory;
+    cb ();
+  });
+}
+
+
+/////////////////////////////////////////
+function select_q (ctx, cb) {
+  ctx.q = ctx.factory.queue (ctx.qname || 'test', ctx.main_opts.queueOpt);
+  cb ();
+}
+
+
+/////////////////////////////////////////
+function info (ctx, cb) {
   async.parallel ({
-    size:         cb => q.size (cb),
-    totalSize:    cb => q.totalSize (cb),
-    schedSize:    cb => q.schedSize (cb),
-    resvSize:     cb => q.resvSize (cb),
-    next_t:       cb => q.next_t (cb),
-    stats:        cb => q.stats (cb),
-    paused:       cb => q.paused (cb),
-    topology:     cb => q.topology (cb),
-    name:         cb => cb (null, q.name()),
-    ns:           cb => cb (null, q.ns()),
-    type:         cb => cb (null, q.type()),
-    capabilities: cb => cb (null, q.capabilities()),
+    size:         cb => ctx.q.size (cb),
+    totalSize:    cb => ctx.q.totalSize (cb),
+    schedSize:    cb => ctx.q.schedSize (cb),
+    resvSize:     cb => ctx.q.resvSize (cb),
+    next_t:       cb => ctx.q.next_t (cb),
+    stats:        cb => ctx.q.stats (cb),
+    paused:       cb => ctx.q.paused (cb),
+//    topology:     cb => ctx.q.topology (cb),
+    name:         cb => cb (null, ctx.q.name()),
+    ns:           cb => cb (null, ctx.q.ns()),
+    type:         cb => cb (null, ctx.q.type()),
+    capabilities: cb => cb (null, ctx.q.capabilities()),
   }, cb);
 }
 
 
 /////////////////////////////////////////
-function consume_loop (q, n, cb) {
-  if (n == 0) return cb ();
+function consume_loop (ctx, state, cb) {
+  if (state.n == 0) return cb ();
 
-  q.pop ('keuss-cli', (err, res) => {
-    if (err) return cb (err);
-
-    if (program.dumpProduced) {
-      console.log ('%j', res, {});
+  ctx.q.pop ('keuss-cli', (err, res) => {
+    if (err) {
+      if (err == 'cancel') return out (ctx, state.id, 'cancelled, stopping consumer');
+      return cb (err);
     }
+    if (ctx.cmd_opts.dumpProduced) console.log ('%j', res);
 
-    if (program.verbose) {
-      console.log ('consume_loop: got element');
-    }
+    const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
+    state.n = next_n;
+    out (ctx, state.id, `got element, ${state.n} to go`);
 
-    var next_n = _.isNil (n) ? n : (n ? n - 1 : n);
-
-    if (program.consumerLoopDelay) {
-      setTimeout (() => consume_loop (q, next_n, cb), program.consumerLoopDelay);
+    if (ctx.cmd_opts.delay) {
+      setTimeout (() => consume_loop (ctx, state, cb), ctx.cmd_opts.delay);
     }
     else {
-      consume_loop (q, next_n, cb);
+      consume_loop (ctx, state, cb);
     }
   });
 }
 
 
 /////////////////////////////////////////
-function produce_loop (q, n, cb) {
-  if (n == 0) return cb ();
+function produce_loop (ctx, state, cb) {
+  if (state.n == 0) return cb ();
 
-  var opts = {};
+  const opts = {};
   if (program.producerDelay) {
     opts.delay = program.producerDelay;
   }
 
-  var obj = objs[chance.integer ({min:0, max:110})];
-  q.push (obj, opts, (err, res) => {
-    if (err) {
-      if (err == 'drain') {
-        console.log ('queue in drain, stopping producer');
-        return;
-      }
+  const obj = state.pool_of_objs[chance.integer ({min:0, max:110})];
 
+  ctx.q.push (obj, opts, (err, res) => {
+    if (err) {
+      if (err == 'drain') return out (ctx, state.id, 'queue in drain, stopping producer');
       return cb (err);
     }
 
-    if (program.verbose) {
-      console.log ('produce_loop: put %j', obj);
-    }
+    if (ctx.cmd_opts.dumpProduced) console.log ('%j', obj);
 
-    var next_n = _.isNil (n) ? n : (n ? n - 1 : n);
+    const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
+    state.n = next_n;
+    out (ctx, state.id, `produced element, ${state.n} to go`);
 
-    if (program.producerLoopDelay) {
-      setTimeout (() => produce_loop (q, next_n, cb), program.producerLoopDelay);
+    if (ctx.cmd_opts.delay) {
+      setTimeout (() => produce_loop (ctx, state, cb), ctx.cmd_opts.delay);
     }
     else {
-      produce_loop (q, next_n, cb);
+      produce_loop (ctx, state, cb);
     }
   });
 }
 
 
+/////////////////////////////////////////
+function parseXOpts (value, prev) {
+  const arr = value.split (':');
+  if (arr.length < 2) throw new program.InvalidArgumentError('value must be k:v');
+  const k = arr.shift();
+  const v = arr.join (':');
 
-var q_opts = {};
-
-console.log (`MQ.init: using backend ${program.backend || 'mongo'}`);
-
-if (program.signaller) {
-  var signal_provider = require ('keuss/signal/' + program.signaller);
-  q_opts.signaller = {
-    provider: signal_provider
-  };
-
-  console.log (`MQ.init: using signeller ${program.signaller}`);
-}
-
-if (program.stats) {
-  var stats_provider = require ('keuss/stats/' + program.stats);
-  q_opts.stats = {
-    provider: stats_provider
-  };
-
-  console.log (`MQ.init: using stats ${program.stats}`);
+  if (!prev) prev = {};
+  prev[k] = v;
+  return prev;
 }
 
 
-var MQ = require ('keuss/backends/' + (program.backend || 'mongo'));
-MQ (q_opts, (err, factory) => {
-  if (err) return console.error ('MQ.init: %s', err, {});
+/////////////////////////////////////////
+function farewell_and_good_night (ctx) {
+  if (ctx.in_terminus) return;
+  ctx.in_terminus = true;
 
-  console.log ('MQ.init: backend initiated');
-
-  var q = factory.queue (program.queue || 'test', {});
-
-  var tasks = [];
-
-  if (program.info) {
-    tasks.push (cb => info (q, (err, res) => {
-      if (err) {
-        console.error (err);
-      }
-      else {
-        console.log (res);
-      }
-
-      cb ();
-    }));
-  }
-
-  if (program.pause) {
-    tasks.push (cb => {q.pause (true); cb(); });
-  }
-
-  if (program.resume) {
-    tasks.push (cb => {q.pause (false); cb(); });
-  }
-
-  for (var c = 0; c < program.consumer; c++) {
-    tasks.push (cb => {
-      console.log ('MQ.init: initiating consume loop');
-      consume_loop (q, program.consumerNum, cb);
-    });
-  }
-
-  for (p = 0; p < program.producer; p++) {
-    tasks.push (cb => {
-      console.log ('MQ.init: initiating produce loop with ', program.producerNum);
-      produce_loop (q, program.producerNum, cb);
-    });
-  }
-
-//  tasks.push ((cb) => setTimeout (cb, 2000));
-
-  async.parallel (tasks, err => {
-    if (err) {
-      console.error (err);
-    }
-    else {
-      console.log (`all done`);
-      _farewell_and_good_night ();
-    }
+  out (ctx, 'farewell...');
+  async.series ([
+    cb => ctx.q.drain (cb),
+    cb => {ctx.factory.close(); cb ();},
+    cb => {ctx.q.cancel (); cb ();}
+  ], err => {
+    if (err) console.error (err);
+    out (ctx, '...and good night');
+    ctx.in_terminus = false;
   });
+}
 
-  function _farewell_and_good_night () {
-    console.log ('farewell...');
-    async.series ([
-      cb => q.drain (cb),
-      cb => {factory.close(); cb ();},
-      cb => {q.cancel (); cb ();}
-    ], () => {
-      if (err) console.error (err);
-      console.log ('...and good night');
-    });
-  }
 
-  process.on( 'SIGINT',  _farewell_and_good_night);
-  process.on( 'SIGQUIT', _farewell_and_good_night);
-  process.on( 'SIGTERM', _farewell_and_good_night);
-  process.on( 'SIGHUP',  _farewell_and_good_night);
+/////////////////////////////////////////
+function prepare_for_termination (ctx, cb) {
+  process.on( 'SIGINT',  () => farewell_and_good_night (ctx));
+  process.on( 'SIGQUIT', () => farewell_and_good_night (ctx));
+  process.on( 'SIGTERM', () => farewell_and_good_night (ctx));
+  process.on( 'SIGHUP',  () => farewell_and_good_night (ctx));
+  cb ();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+program
+.version ('0.0.1')
+.usage   ('[options]')
+.option  ('-v, --verbose', 'be verbose')
+.option  ('-O, --queue-opt <opt>', 'option to b added to queue, format k:v', parseXOpts)
+.option  ('-b, --backend <value>', 'use queue backend. defaults to \'mongo\'')
+.option  ('-o, --backend-opt <value>', 'option to b added to backend, format k:v', parseXOpts)
+.option  ('-s, --signaller <value>', 'use signaller backend')
+.option  ('-t, --stats <value>', 'use stats backend');
+
+//////////////////////////////////////////////
+program
+.command ('info')
+.description ('show info and stats for a queue')
+.argument ('<queue>', 'queue to operate on')
+.action (function (queue) {
+  const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => select_q (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => info (ctx, cb),
+  ], (err, res) => {
+    if (err) console.error (err);
+    else console.log (res[3]);
+    farewell_and_good_night (ctx);
+  });
 });
+
+//////////////////////////////////////////////
+program
+.command ('pause')
+.description ('pauses a queue')
+.argument ('<queue>', 'queue to operate on')
+.action (function (queue) {
+  const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => select_q (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => {ctx.q.pause (true); cb(); },
+    cb => setTimeout (cb, 100),
+    cb => ctx.q.paused (cb)
+  ], (err, res) => {
+    if (err) console.error (err);
+    else console.log (res[5]);
+    farewell_and_good_night (ctx);
+  });
+});
+
+//////////////////////////////////////////////
+program
+.command ('resume')
+.description ('resumes a queue')
+.argument ('<queue>', 'queue to operate on')
+.action (function (queue) {
+  const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => select_q (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => {ctx.q.pause (false); cb(); },
+    cb => setTimeout (cb, 100),
+    cb => ctx.q.paused (cb)
+  ], (err, res) => {
+    if (err) console.error (err);
+    else console.log (res[5]);
+    farewell_and_good_night (ctx);
+  });
+});
+
+//////////////////////////////////////////////
+program
+.command ('consume')
+.description ('consumes (pops) from a queue')
+.argument ('<queue>', 'queue to operate on')
+.option  ('-c, --count <n>', 'number of elements to consume, -1 for infinite', parseInt)
+.option  ('-p, --parallel <n>', 'number of consumers', parseInt)
+.option  ('-d, --delay <ms>', 'delay at the end of each loop cycle, im millisecs', parseInt)
+.option  ('-D, --dump-produced', 'dump text of produced messages to stdout')
+.action (function (queue) {
+  const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  const loops = [];
+  for (let c = 0; c < (ctx.cmd_opts.parallel || 1); c++) {
+    loops.push (cb => {
+      const state = {
+        id: `loop#${c}`,
+        n: ctx.cmd_opts.count || -1
+      };
+
+      out (ctx, `Consume: initiating consume loop #${c}`);
+      consume_loop (ctx, state, cb);
+    });
+  }
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => select_q (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => async.parallel (loops, cb),
+  ], (err, res) => {
+    if (err) console.error (err);
+    farewell_and_good_night (ctx);
+  });
+});
+
+//////////////////////////////////////////////
+program
+.command ('produce')
+.description ('produces (pushes) to a queue')
+.argument ('<queue>', 'queue to operate on')
+.option  ('-c, --count <n>', 'number of elements to produce, -1 for infinite', parseInt)
+.option  ('-p, --parallel <n>', 'number of produers', parseInt)
+.option  ('-d, --delay <ms>', 'delay at the end of each loop cycle, im millisecs', parseInt)
+.option  ('-D, --dump-produced', 'dump text of produced messages to stdout')
+.action (function (queue) {
+  const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  const loops = [];
+  for (let c = 0; c < (ctx.cmd_opts.parallel || 1); c++) {
+    loops.push (cb => {
+      const state = {
+        id: `loop#${c}`,
+        n: ctx.cmd_opts.count || -1
+      };
+
+      // prepare pool of random objects
+      state.pool_of_objs = [];
+      for (let i = 0; i < 111; i++) state.pool_of_objs.push (rand_obj.randomObject ());
+
+      out (ctx, `Consume: initiating produce loop #${c}`);
+      produce_loop (ctx, state, cb);
+    });
+  }
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => select_q (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => async.parallel (loops, cb),
+  ], (err, res) => {
+    if (err) console.error (err);
+    farewell_and_good_night (ctx);
+  });
+});
+
+//////////////////////////////////////////////
+program.parse (process.argv);
