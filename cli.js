@@ -79,7 +79,7 @@ function info (ctx, cb) {
 
 
 /////////////////////////////////////////
-function consume_loop (ctx, state, cb) {
+function pop_loop (ctx, state, cb) {
   if (state.n == 0) return cb ();
 
   ctx.q.pop ('keuss-cli', (err, res) => {
@@ -91,26 +91,52 @@ function consume_loop (ctx, state, cb) {
 
     const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
     state.n = next_n;
-    out (ctx, state.id, `got element, ${state.n} to go`);
+    out (ctx, state.id, `got (pop) element, ${state.n} to go`);
 
     if (ctx.cmd_opts.delay) {
-      setTimeout (() => consume_loop (ctx, state, cb), ctx.cmd_opts.delay);
+      setTimeout (() => pop_loop (ctx, state, cb), ctx.cmd_opts.delay);
     }
     else {
-      consume_loop (ctx, state, cb);
+      pop_loop (ctx, state, cb);
     }
   });
 }
 
 
 /////////////////////////////////////////
-function produce_loop (ctx, state, cb) {
+function rcr_loop (ctx, state, cb) {
+  if (state.n == 0) return cb ();
+
+  ctx.q.pop ('keuss-cli', {reserve: true}, (err, res) => {
+    if (err) {
+      if (err == 'cancel') return out (ctx, state.id, 'cancelled, stopping consumer');
+      return cb (err);
+    }
+
+    ctx.q.ok (res, err => {
+      if (err) return cb (err);
+      if (ctx.cmd_opts.dumpProduced) console.log ('%j', res);
+
+      const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
+      state.n = next_n;
+      out (ctx, state.id, `got (reserve+commit) element, ${state.n} to go`);
+
+      if (ctx.cmd_opts.delay) {
+        setTimeout (() => rcr_loop (ctx, state, cb), ctx.cmd_opts.delay);
+      }
+      else {
+        rcr_loop (ctx, state, cb);
+      }
+    });
+  });
+}
+
+
+/////////////////////////////////////////
+function push_loop (ctx, state, cb) {
   if (state.n == 0) return cb ();
 
   const opts = {};
-  if (program.producerDelay) {
-    opts.delay = program.producerDelay;
-  }
 
   const obj = state.pool_of_objs[chance.integer ({min:0, max:110})];
 
@@ -124,13 +150,13 @@ function produce_loop (ctx, state, cb) {
 
     const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
     state.n = next_n;
-    out (ctx, state.id, `produced element, ${state.n} to go`);
+    out (ctx, state.id, `pushed element, ${state.n} to go`);
 
     if (ctx.cmd_opts.delay) {
-      setTimeout (() => produce_loop (ctx, state, cb), ctx.cmd_opts.delay);
+      setTimeout (() => push_loop (ctx, state, cb), ctx.cmd_opts.delay);
     }
     else {
-      produce_loop (ctx, state, cb);
+      push_loop (ctx, state, cb);
     }
   });
 }
@@ -256,13 +282,14 @@ program
 
 //////////////////////////////////////////////
 program
-.command ('consume')
+.command ('pop')
 .description ('consumes (pops) from a queue')
 .argument ('<queue>', 'queue to operate on')
 .option  ('-c, --count <n>', 'number of elements to consume, -1 for infinite', parseInt)
 .option  ('-p, --parallel <n>', 'number of consumers', parseInt)
 .option  ('-d, --delay <ms>', 'delay at the end of each loop cycle, im millisecs', parseInt)
 .option  ('-D, --dump-produced', 'dump text of produced messages to stdout')
+.option  ('-R, --reserve', 'doa reserve+commit instead of a pop')
 .action (function (queue) {
   const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
   out (ctx, 'ctx is', ctx);
@@ -275,8 +302,13 @@ program
         n: ctx.cmd_opts.count || -1
       };
 
-      out (ctx, `Consume: initiating consume loop #${c}`);
-      consume_loop (ctx, state, cb);
+      out (ctx, `pop: initiating pop loop #${c}`);
+      if (ctx.cmd_opts.reserve) {
+        rcr_loop (ctx, state, cb);
+      }
+      else {
+        pop_loop (ctx, state, cb);
+      }
     });
   }
 
@@ -293,7 +325,7 @@ program
 
 //////////////////////////////////////////////
 program
-.command ('produce')
+.command ('push')
 .description ('produces (pushes) to a queue')
 .argument ('<queue>', 'queue to operate on')
 .option  ('-c, --count <n>', 'number of elements to produce, -1 for infinite', parseInt)
@@ -316,8 +348,8 @@ program
       state.pool_of_objs = [];
       for (let i = 0; i < 111; i++) state.pool_of_objs.push (rand_obj.randomObject ());
 
-      out (ctx, `Consume: initiating produce loop #${c}`);
-      produce_loop (ctx, state, cb);
+      out (ctx, `pop: initiating push loop #${c}`);
+      push_loop (ctx, state, cb);
     });
   }
 
