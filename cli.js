@@ -5,6 +5,7 @@ const program =  require ('commander');
 const _ =        require ('lodash');
 const rand_obj = require ('random-object');
 const Chance =   require('chance');
+const util =     require ('util');
 
 const chance = new Chance();
 
@@ -56,25 +57,6 @@ function create_mq (ctx, cb) {
 function select_q (ctx, cb) {
   ctx.q = ctx.factory.queue (ctx.qname || 'test', ctx.main_opts.queueOpt);
   cb ();
-}
-
-
-/////////////////////////////////////////
-function info (ctx, cb) {
-  async.parallel ({
-    size:         cb => ctx.q.size (cb),
-    totalSize:    cb => ctx.q.totalSize (cb),
-    schedSize:    cb => ctx.q.schedSize (cb),
-    resvSize:     cb => ctx.q.resvSize (cb),
-    next_t:       cb => ctx.q.next_t (cb),
-    stats:        cb => ctx.q.stats (cb),
-    paused:       cb => ctx.q.paused (cb),
-//    topology:     cb => ctx.q.topology (cb),
-    name:         cb => cb (null, ctx.q.name()),
-    ns:           cb => cb (null, ctx.q.ns()),
-    type:         cb => cb (null, ctx.q.type()),
-    capabilities: cb => cb (null, ctx.q.capabilities()),
-  }, cb);
 }
 
 
@@ -181,10 +163,19 @@ function farewell_and_good_night (ctx) {
   ctx.in_terminus = true;
 
   out (ctx, 'farewell...');
+
   async.series ([
-    cb => ctx.q.drain (cb),
+    cb => {
+      if (ctx.q) {
+        ctx.q.drain (cb);
+      }
+      else {
+        cb();
+      }
+    },
+    cb => {if (ctx.q) ctx.q.cancel (); cb ();},
+    cb => setTimeout (cb, 100),
     cb => {ctx.factory.close(); cb ();},
-    cb => {ctx.q.cancel (); cb ();}
   ], err => {
     if (err) console.error (err);
     out (ctx, '...and good night');
@@ -204,7 +195,7 @@ function prepare_for_termination (ctx, cb) {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 program
-.version ('0.0.1')
+.version ('1.2.0')
 .usage   ('[options]')
 .option  ('-v, --verbose', 'be verbose')
 .option  ('-O, --queue-opt <opt>', 'option to b added to queue, format k:v', parseXOpts)
@@ -212,6 +203,27 @@ program
 .option  ('-o, --backend-opt <value>', 'option to b added to backend, format k:v', parseXOpts)
 .option  ('-s, --signaller <value>', 'use signaller backend')
 .option  ('-t, --stats <value>', 'use stats backend');
+
+//////////////////////////////////////////////
+program
+.command ('list')
+.description ('list queues inside backend')
+.option  ('-d, --details', 'show stats-provided details')
+.option  ('-i, --info', 'run an info command on each queue')
+.action (function () {
+  const ctx = {main_opts: program.opts(), cmd_opts: this.opts()};
+  out (ctx, 'ctx is', ctx);
+
+  async.series ([
+    cb => create_mq (ctx, cb),
+    cb => prepare_for_termination (ctx, cb),
+    cb => ctx.factory.list ({full: ctx.cmd_opts.details}, cb),
+  ], (err, res) => {
+    if (err) console.error (err);
+    else console.log (util.inspect(res[2], {depth: null, colors: true}));
+    farewell_and_good_night (ctx);
+  });
+});
 
 //////////////////////////////////////////////
 program
@@ -226,10 +238,10 @@ program
     cb => create_mq (ctx, cb),
     cb => select_q (ctx, cb),
     cb => prepare_for_termination (ctx, cb),
-    cb => info (ctx, cb),
+    cb => ctx.q.info (cb),
   ], (err, res) => {
     if (err) console.error (err);
-    else console.log (res[3]);
+    else console.log (util.inspect(res[3], {depth: null, colors: true}));
     farewell_and_good_night (ctx);
   });
 });
