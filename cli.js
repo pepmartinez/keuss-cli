@@ -175,7 +175,7 @@ function farewell_and_good_night (ctx) {
     },
     cb => {if (ctx.q) ctx.q.cancel (); cb ();},
     cb => setTimeout (cb, 100),
-    cb => {ctx.factory.close(); cb ();},
+    cb => {if (ctx.factory) ctx.factory.close(); cb ();},
   ], err => {
     if (err) console.error (err);
     out (ctx, '...and good night');
