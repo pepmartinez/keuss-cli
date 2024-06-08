@@ -62,18 +62,20 @@ function select_q (ctx, cb) {
 
 /////////////////////////////////////////
 function pop_loop (ctx, state, cb) {
-  if (state.n == 0) return cb ();
+  if (state.g.n == 0) return cb ();
+
+  const next_n = (state.g.n == -1) ? state.g.n : (state.g.n ? state.g.n - 1 : state.g.n);
+  state.g.n = next_n;
 
   ctx.q.pop ('keuss-cli', (err, res) => {
     if (err) {
       if (err == 'cancel') return out (ctx, state.id, 'cancelled, stopping consumer');
       return cb (err);
     }
+
     if (ctx.cmd_opts.dumpProduced) console.log ('%j', res);
 
-    const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
-    state.n = next_n;
-    out (ctx, state.id, `got (pop) element, ${state.n} to go`);
+    out (ctx, state.id, `got (pop) element, ${state.g.n} to go`);
 
     if (ctx.cmd_opts.delay) {
       setTimeout (() => pop_loop (ctx, state, cb), ctx.cmd_opts.delay);
@@ -87,7 +89,10 @@ function pop_loop (ctx, state, cb) {
 
 /////////////////////////////////////////
 function rcr_loop (ctx, state, cb) {
-  if (state.n == 0) return cb ();
+  if (state.g.n == 0) return cb ();
+
+  const next_n = (state.g.n == -1) ? state.g.n : (state.g.n ? state.g.n - 1 : state.g.n);
+  state.g.n = next_n;
 
   ctx.q.pop ('keuss-cli', {reserve: true}, (err, res) => {
     if (err) {
@@ -99,9 +104,7 @@ function rcr_loop (ctx, state, cb) {
       if (err) return cb (err);
       if (ctx.cmd_opts.dumpProduced) console.log ('%j', res);
 
-      const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
-      state.n = next_n;
-      out (ctx, state.id, `got (reserve+commit) element, ${state.n} to go`);
+      out (ctx, state.id, `got (reserve+commit) element, ${state.g.n} to go`);
 
       if (ctx.cmd_opts.delay) {
         setTimeout (() => rcr_loop (ctx, state, cb), ctx.cmd_opts.delay);
@@ -116,11 +119,14 @@ function rcr_loop (ctx, state, cb) {
 
 /////////////////////////////////////////
 function push_loop (ctx, state, cb) {
-  if (state.n == 0) return cb ();
+  if (state.g.n == 0) return cb ();
 
   const opts = {};
 
   const obj = state.obj || state.pool_of_objs[chance.integer ({min:0, max:110})];
+
+  const next_n = (state.g.n == -1) ? state.g.n : (state.g.n ? state.g.n - 1 : state.g.n);
+  state.g.n = next_n;
 
   ctx.q.push (obj, opts, (err, res) => {
     if (err) {
@@ -129,10 +135,7 @@ function push_loop (ctx, state, cb) {
     }
 
     if (ctx.cmd_opts.dumpProduced) console.log ('%j', obj);
-
-    const next_n = (state.n == -1) ? state.n : (state.n ? state.n - 1 : state.n);
-    state.n = next_n;
-    out (ctx, state.id, `pushed element, ${state.n} to go`);
+    out (ctx, state.id, `pushed element, ${state.g.n} to go`);
 
     if (ctx.cmd_opts.delay) {
       setTimeout (() => push_loop (ctx, state, cb), ctx.cmd_opts.delay);
@@ -306,12 +309,16 @@ program
   const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
   out (ctx, 'ctx is', ctx);
 
+  const global_state = {
+    n: ctx.cmd_opts.count || -1
+  };
+
   const loops = [];
   for (let c = 0; c < (ctx.cmd_opts.parallel || 1); c++) {
     loops.push (cb => {
       const state = {
+        g: global_state,
         id: `loop#${c}`,
-        n: ctx.cmd_opts.count || -1
       };
 
       out (ctx, `pop: initiating pop loop #${c}`);
@@ -349,12 +356,16 @@ program
   const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
   out (ctx, 'ctx is', ctx);
 
+  const global_state = {
+    n: ctx.cmd_opts.count || -1
+  };
+
   const loops = [];
   for (let c = 0; c < (ctx.cmd_opts.parallel || 1); c++) {
     loops.push (cb => {
       const state = {
+        g: global_state,
         id: `loop#${c}`,
-        n: ctx.cmd_opts.count || -1
       };
 
       if (ctx.cmd_opts.object) {
