@@ -120,7 +120,7 @@ function push_loop (ctx, state, cb) {
 
   const opts = {};
 
-  const obj = state.pool_of_objs[chance.integer ({min:0, max:110})];
+  const obj = state.obj || state.pool_of_objs[chance.integer ({min:0, max:110})];
 
   ctx.q.push (obj, opts, (err, res) => {
     if (err) {
