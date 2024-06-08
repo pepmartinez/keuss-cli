@@ -341,9 +341,10 @@ program
 .description ('produces (pushes) to a queue')
 .argument ('<queue>', 'queue to operate on')
 .option  ('-c, --count <n>', 'number of elements to produce, -1 for infinite', parseInt)
-.option  ('-p, --parallel <n>', 'number of produers', parseInt)
+.option  ('-p, --parallel <n>', 'number of producers', parseInt)
 .option  ('-d, --delay <ms>', 'delay at the end of each loop cycle, im millisecs', parseInt)
 .option  ('-D, --dump-produced', 'dump text of produced messages to stdout')
+.option  ('-J, --object <value>', 'dump text of produced messages to stdout', JSON.parse)
 .action (function (queue) {
   const ctx = {qname: queue, main_opts: program.opts(), cmd_opts: this.opts()};
   out (ctx, 'ctx is', ctx);
@@ -356,9 +357,14 @@ program
         n: ctx.cmd_opts.count || -1
       };
 
-      // prepare pool of random objects
-      state.pool_of_objs = [];
-      for (let i = 0; i < 111; i++) state.pool_of_objs.push (rand_obj.randomObject ());
+      if (ctx.cmd_opts.object) {
+        state.obj = ctx.cmd_opts.object;
+      }
+      else {
+        // prepare pool of random objects
+        state.pool_of_objs = [];
+        for (let i = 0; i < 111; i++) state.pool_of_objs.push (rand_obj.randomObject ());
+      }
 
       out (ctx, `pop: initiating push loop #${c}`);
       push_loop (ctx, state, cb);
