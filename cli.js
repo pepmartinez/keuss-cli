@@ -56,7 +56,7 @@ function create_mq (ctx, cb) {
 /////////////////////////////////////////
 function select_q (ctx, cb) {
   ctx.q = ctx.factory.queue (ctx.qname || 'test', ctx.main_opts.queueOpt);
-  cb ();
+  ctx.q.init (cb);
 }
 
 
