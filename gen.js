@@ -49,7 +49,7 @@ class Gen {
     if (this._elems == 0) return cb ();
 
     const opts = {};
-    const obj = this._pool_of_objs [chance.integer ({min:0, max:_.size (this._pool_of_objs)})];
+    const obj = this._pool_of_objs [chance.integer ({min:0, max:_.size (this._pool_of_objs) - 1})];
 
     if (this._elems > 0) this._elems--;
 

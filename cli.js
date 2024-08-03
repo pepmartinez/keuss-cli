@@ -8,11 +8,12 @@ const util =     require ('util');
 const Ctx =  require ('./ctx');
 const Gen =  require ('./gen');
 const Push = require ('./push');
+const Pop  = require ('./pop');
 
 const { Command } = require('commander');
 const program = new Command();
 
-
+/*
 /////////////////////////////////////////
 function pop_loop (ctx, state, cb) {
   if (state.g.n == 0) return cb ();
@@ -78,7 +79,7 @@ function rcr_loop (ctx, state, cb) {
     });
   });
 }
-
+*/
 
 /////////////////////////////////////////
 function parseXOpts (value, prev) {
@@ -234,7 +235,6 @@ const ctx = new Ctx();
   .command ('push')
   .description ('produces (pushes) to a queue, reading from stdin')
   .argument ('<queue>', 'queue to operate on')
-  .option  ('-R, --reserve', 'doa reserve+commit instead of a pop')
   .action (function (queue) {
     ctx.set_main_opts (program.opts());
     ctx.set_cmd_opts (this.opts());
@@ -246,6 +246,31 @@ const ctx = new Ctx();
       cb => ctx.create_mq (cb),
       cb => ctx.select_q (cb),
       cb => push.run (cb),
+    ], (err, res) => {
+      if (err) console.error ('--- push cmd --- done', err);
+      farewell_and_good_night (ctx);
+    });
+  });
+
+
+  //////////////////////////////////////////////
+  program
+  .command ('pop')
+  .description ('consumes (pops) from a queue, writing to stdout')
+  .argument ('<queue>', 'queue to operate on')
+  .option  ('-R, --reserve', 'doa reserve+commit instead of a pop')
+  .option  ('-c, --count <n>', 'number of elements to produce, -1 for infinite', parseInt)
+  .action (function (queue) {
+    ctx.set_main_opts (program.opts());
+    ctx.set_cmd_opts (this.opts());
+    ctx.set_qname (queue);
+
+    const pop = new Pop (ctx);
+
+    async.series ([
+      cb => ctx.create_mq (cb),
+      cb => ctx.select_q (cb),
+      cb => pop.run (cb),
     ], (err, res) => {
       if (err) console.error ('--- push cmd --- done', err);
       farewell_and_good_night (ctx);
